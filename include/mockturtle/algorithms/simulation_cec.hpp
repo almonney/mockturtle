@@ -74,7 +74,88 @@ public:
   bool run()
   {
     /* TODO: write your implementation here */
-    return false;
+
+    // Init parameters
+    auto n = _ntk.num_pis(); // Returns the number of primary inputs.
+    auto V = _ntk.size();    // Returns the number of nodes (incl. constants and PIs and dead nodes).
+
+    // compute_splitting_var(n)
+    if ( n <= 6 )
+    {
+      _st.split_var = n;
+    }
+    else
+    {
+      unsigned int m = 7;
+      while ( ( ( 32 + ( 1u << ( m - 3 ) ) ) * V <= 1u << 29 ) && ( m <= n ) )
+      {
+        ++m;
+      }
+      _st.split_var = m - 1;
+    }
+
+    // compute_rounds(n, split_var)
+    _st.rounds = ( 1u << ( n - _st.split_var ) );
+
+    // Simulator parameter
+    default_simulator<kitty::dynamic_truth_table> sim( _st.split_var );
+
+    // init_pattern
+    pattern_t pattern( _ntk );
+
+    // for each pattern simulate and check equivalence
+    bool equivalence = true;
+    for ( unsigned int i = 0; i < _st.rounds; ++i )
+    {
+      // update_pattern(N, patterns, split_var, i)
+      _ntk.foreach_pi( [&]( node const& pi )
+                       {
+        kitty::dynamic_truth_table tt (_st.split_var);
+        if (pi <=  _st.split_var){
+          kitty::create_nth_var(tt, pi - 1);
+          pattern[pi] = tt;
+        }
+        else
+        {
+          if (((i) >> (pi - _st.split_var - 1)) % 2){
+            pattern[pi] = tt;
+          }
+          else {
+            pattern[pi] = ~tt;
+          }
+        } } );
+
+      // simulate(N, patterns);
+      simulate_nodes( _ntk, pattern, sim );
+
+      /* if pattern(get_po(N)) != 0 then
+       *  return not equivalent
+       */
+      _ntk.foreach_po( [&]( signal const& po )
+                       {
+        if (_ntk.is_complemented(po))
+        {
+          if (!is_const0(~pattern[po]))
+          {
+            equivalence = false;
+            return false;
+          }
+        }
+        else
+        {
+          if (!is_const0(pattern[po]))
+          {
+            equivalence = false;
+            return false;
+          }
+        }
+        return true; } );
+
+      if ( !equivalence )
+        return false;
+    }
+
+    return true;
   }
 
 private:
